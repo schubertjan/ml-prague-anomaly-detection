@@ -1,0 +1,37 @@
+# Use case: aggregate web server access log events
+#   group by path, break down by status_code  (count value_type, 5m window)
+# Independent of the syslog use case: own topic, group, index, window.
+use_case:
+  name: access_log
+  source: access_log                # -> output field "source"
+
+  freq: 5m
+
+  # FIELD to group by -> "aggregation_level"; each value -> "entity"
+  aggregation_level: path
+
+  # FIELD(s) to break the group down by -> "metric_name"; each value -> "metric_value"
+  metric_names:
+    - status_code
+
+  value_type: count
+
+  # ElasticSearch index documents are written into
+  index_name: access-5m
+
+  timestamp_field: timestamp
+
+kafka:
+  bootstrap_servers: localhost:9092
+  topic: access-log-events
+  consumer:
+    group_id: agg-access-log
+    # Optional TLS (real deployment, per reference config):
+    # security_protocol: SSL
+    # ssl_certfile: /cdi-certs/certificate-pem
+    # ssl_keyfile: /cdi-certs/priv-pkcs8
+    # ssl_cafile: /cdi-certs/ca-chain.pem
+
+elasticsearch:
+  hosts:
+    - http://localhost:9200

@@ -1,0 +1,108 @@
+# Full mock pipeline: kafka + elasticsearch + kibana + producer + aggregator.
+#
+#   docker compose up -d    start everything (Kibana: http://localhost:5601)
+#   docker compose logs -f  follow
+#   docker compose down     stop & remove
+#
+# The python services use Astral's uv image (no custom build): the repo is
+# mounted and each service creates its own uv-managed venv in a named volume
+# at start (the host .venv is never touched).
+# They reach the infra via env overrides (KAFKA_BOOTSTRAP_SERVERS, ES_HOSTS).
+
+services:
+  kafka:
+    image: bitnami/kafka:3.7
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: controller,broker
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_RETENTION_HOURS: "1"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-ready-test"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.14.3
+    ports:
+      - "9200:9200"
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  # Kibana for reviewing the aggregated docs (heavy; remove this service
+  # from the file if you need the RAM): http://localhost:5601
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.14.3
+    ports:
+      - "5601:5601"
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+      SERVER_NAME: kibana
+      NODE_OPTIONS: --max-old-space-size=512
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+  syslog_producer:
+    image: astral/uv:python3.13-bookworm-slim
+    working_dir: /app
+    volumes:
+      - .:/app
+      - uv-cache:/root/.cache/uv
+      - producer-venv:/venv
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      UV_PROJECT_ENVIRONMENT: /venv
+      # Stream volume; defaults shown, still overridable per command, e.g.
+      #   RATE=500 DURATION=60 docker compose up -d syslog_producer
+      RATE: "${RATE:-100}"        # docs per second, 0 = unthrottled
+      DURATION: "${DURATION:-0}"  # seconds, 0 = until stopped
+    command: >
+      sh -c "uv sync --no-dev &&
+             uv run python data_generator.py --topic syslog-events --brokers kafka:9092 --rate $$RATE --duration $$DURATION"
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  syslog_pipeline:
+    image: astral/uv:python3.13-bookworm-slim
+    working_dir: /app
+    volumes:
+      - .:/app
+      - uv-cache:/root/.cache/uv
+      - pipeline-venv:/venv
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      ES_HOSTS: http://elasticsearch:9200
+      UV_PROJECT_ENVIRONMENT: /venv
+    command: >
+      sh -c "uv sync --no-dev &&
+             uv run python -m agg_pipeline --config configs/syslog.yaml"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+
+volumes:
+  uv-cache:
+  producer-venv:
+  pipeline-venv:

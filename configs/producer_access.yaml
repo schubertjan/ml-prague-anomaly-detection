@@ -1,0 +1,25 @@
+# Mock producer: push dummy web access log events into kafka.
+kafka:
+  bootstrap_servers: localhost:9092
+  topic: access-log-events
+  producer:
+    enable_idempotence: true
+    acks: "all"
+    # Optional TLS (real deployment, per reference config):
+    # security_protocol: SSL
+    # ssl_certfile: /cdi-certs/certificate-pem
+    # ssl_keyfile: /cdi-certs/priv-pkcs8
+    # ssl_cafile: /cdi-certs/ca-chain.pem
+
+rate: 5
+duration_seconds: 0
+count: 0
+
+fields:
+  timestamp: {type: now}
+  client_ip: {type: template, pattern: "203.0.113.{int:0-254}"}
+  method: {type: choice, values: [GET, GET, GET, POST, PUT, DELETE]}
+  path: {type: choice, values: ["/", "/api/v1/health", "/api/v1/users", "/api/v1/orders", "/static/app.js", "/login"]}  # aggregation_level
+  status_code: {type: choice, values: [200, 200, 200, 200, 301, 304, 400, 403, 404, 500, 502]}  # metric_name
+  bytes: {type: int, min: 0, max: 50000}
+  user_agent: {type: choice, values: ["curl/8.5.0", "Mozilla/5.0 (X11; Linux)", "kube-probe/1.29", "python-requests/2.31"]}

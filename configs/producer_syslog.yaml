@@ -1,0 +1,44 @@
+# Mock producer: push dummy syslog events into kafka.
+# Generators:
+#   {type: now}                          -> current UTC time, ISO 8601
+#   {type: choice, values: [a, b]}       -> random pick (duplicates = weights)
+#   {type: int, min: 0, max: 99}         -> random int
+#   {type: static, value: foo}           -> constant
+#   {type: template, pattern: "svr-{int:0-19}"}
+#     -> "{int:a-b}" segments replaced by random ints
+kafka:
+  bootstrap_servers: localhost:9092
+  topic: syslog-events
+  producer:
+    enable_idempotence: true
+    acks: "all"
+    # Optional TLS (real deployment, per reference config):
+    # security_protocol: SSL
+    # ssl_certfile: /cdi-certs/certificate-pem
+    # ssl_keyfile: /cdi-certs/priv-pkcs8
+    # ssl_cafile: /cdi-certs/ca-chain.pem
+
+rate: 20                  # docs per second (0 = as fast as possible)
+duration_seconds: 0       # 0 = run until interrupted
+count: 0                  # if > 0, produce exactly this many docs and exit
+
+fields:
+  timestamp: {type: now}
+  # the fields the syslog use case aggregates on:
+  facility: {type: choice, values: [kern, auth, daemon, cron, local0, user]}  # aggregation_level
+  severity:                                              # metric_name (duplicates = weights)
+    type: choice
+    values: [info, info, info, info, notice, notice, warning, warning, err, debug, crit, alert, emerg]
+  tag: {type: choice, values: [cron, sshd, systemd, nginx, kernel, su, named, dbus]}  # metric_name
+  host_name: {type: template, pattern: "svr-{int:0-19}"}
+  message:
+    type: choice
+    values:
+      - "session opened for user deploy"
+      - "Failed password for root from 203.0.113.7 port 44122 ssh2"
+      - "CRON (root) CMD (/usr/local/lib/cleanup.sh)"
+      - "Started Daily apt download activities."
+      - "eth0: link up (full-duplex, 1000Mbps)"
+      - "Accepted publickey for deploy from 198.51.100.9 port 51234 ssh2"
+      - "worker process exited on signal"
+      - "New session 42 of user deploy"

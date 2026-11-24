@@ -1,0 +1,45 @@
+# Use case: aggregate syslog events
+#   group by facility, break down by severity and tag
+#   (e.g. share of "err" severity within facility "daemon" per minute)
+# One config = one consumer group, one pipeline, one ES index.
+use_case:
+  name: syslog
+  source: syslog                    # -> output field "source"
+
+  # Aggregation window: 30s | 1m | 5m | 10m | 1h ...
+  freq: 1m
+
+  # FIELD to group by -> output "aggregation_level"; each value -> "entity"
+  aggregation_level: facility       # kern, auth, daemon, cron, local0, user, ...
+
+  # One or more FIELDS to break the group down by -> output "metric_name";
+  # each value -> "metric_value". Each metric is aggregated independently.
+  # One output doc per (entity, metric_name, metric_value) per window.
+  metric_names:
+    - severity                      # emerg|alert|crit|err|warning|notice|info|debug
+    - tag                           # logger name: cron, sshd, systemd, nginx, ...
+
+  # value_type: "share" -> value = n / all events for this entity and metric_name in the window
+  #             "count" -> value = n
+  value_type: share
+
+  # ElasticSearch index documents are written into
+  index_name: syslog-1m
+
+  # Field in the incoming event carrying the event time (ISO 8601)
+  timestamp_field: timestamp
+
+kafka:
+  bootstrap_servers: localhost:9092
+  topic: syslog-events
+  consumer:
+    group_id: agg-syslog
+    # Optional TLS (real deployment, per reference config):
+    # security_protocol: SSL
+    # ssl_certfile: /cdi-certs/certificate-pem
+    # ssl_keyfile: /cdi-certs/priv-pkcs8
+    # ssl_cafile: /cdi-certs/ca-chain.pem
+
+elasticsearch:
+  hosts:
+    - http://localhost:9200
